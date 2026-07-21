@@ -1,6 +1,6 @@
 /* ===== Tire Special & Auto Repair — backend API client ===== */
 (function () {
-  var API_BASE = window.TS_API_BASE || 'http://localhost:4000';
+  var API_BASE = window.TS_API_BASE || 'https://tire-special-website-production.up.railway.app';
 
   function searchTires(params) {
     var url = API_BASE + '/api/tires/search'
