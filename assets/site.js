@@ -157,28 +157,62 @@
     results.style.cssText = 'max-width:1280px;margin:18px auto 0;padding:0 24px;';
     box.insertAdjacentElement('afterend', results);
 
+    var QTY_OPTIONS = [
+      { key: 'qty1', label: '1 Tire' },
+      { key: 'qty2', label: '2 Tires' },
+      { key: 'qty3Plus', label: '3+ Tires' }
+    ];
+    var selectedQty = 'qty1';
+    var lastItems = null;
+
+    function formatPrice(n) { return '$' + Number(n).toFixed(2); }
+
     function renderMessage(text) {
+      lastItems = null;
       results.hidden = false;
       results.innerHTML = '<div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:20px 22px;color:var(--muted);font-family:\'Barlow\',sans-serif;font-size:15px;">' + escapeHtml(text) + '</div>';
     }
 
     function renderResults(items) {
       results.hidden = false;
+      lastItems = items;
       if (!items || !items.length) {
         renderMessage("No tires found for that size. Call us and we'll check availability.");
         return;
       }
+
+      var qtyBar = '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;">' +
+        QTY_OPTIONS.map(function (opt) {
+          var active = opt.key === selectedQty;
+          return '<button type="button" data-qty-option="' + opt.key + '" style="cursor:pointer;font-family:\'Barlow Condensed\',sans-serif;font-weight:700;font-size:14px;letter-spacing:.04em;text-transform:uppercase;padding:9px 16px;border-radius:9px;border:1px solid ' + (active ? 'transparent' : 'var(--border)') + ';background:' + (active ? '#FFD21E' : 'var(--surface)') + ';color:' + (active ? '#16171b' : 'var(--text)') + ';">' + opt.label + '</button>';
+        }).join('') +
+      '</div>';
+
       var rows = items.map(function (item) {
         var tags = [];
         if (item.partCode) tags.push('<span>Part# ' + escapeHtml(item.partCode) + '</span>');
         if (item.speedIndex) tags.push('<span>Speed ' + escapeHtml(item.speedIndex) + '</span>');
         if (item.availability) tags.push('<span>Avail ' + escapeHtml(item.availability) + '</span>');
+        var priceText = item.retailPrice && typeof item.retailPrice[selectedQty] === 'number'
+          ? formatPrice(item.retailPrice[selectedQty]) + ' / tire'
+          : 'Call for price';
         return '<div style="display:flex;flex-wrap:wrap;gap:6px 18px;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid var(--border);">' +
           '<div style="font-family:\'Barlow\',sans-serif;font-size:15px;color:var(--text);font-weight:600;">' + escapeHtml(item.description) + '</div>' +
-          '<div style="display:flex;gap:16px;flex-wrap:wrap;font-size:13px;color:var(--muted);font-family:\'Barlow Condensed\',sans-serif;letter-spacing:.03em;text-transform:uppercase;">' + tags.join('') + '</div>' +
+          '<div style="display:flex;gap:16px;flex-wrap:wrap;align-items:center;">' +
+            '<div style="display:flex;gap:16px;flex-wrap:wrap;font-size:13px;color:var(--muted);font-family:\'Barlow Condensed\',sans-serif;letter-spacing:.03em;text-transform:uppercase;">' + tags.join('') + '</div>' +
+            '<div style="font-family:\'Barlow Condensed\',sans-serif;font-weight:800;font-size:17px;color:var(--text);white-space:nowrap;">' + priceText + '</div>' +
+          '</div>' +
         '</div>';
       }).join('');
-      results.innerHTML = '<div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;overflow:hidden;">' + rows + '</div>';
+
+      results.innerHTML = qtyBar + '<div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;overflow:hidden;">' + rows + '</div>';
+
+      Array.prototype.forEach.call(results.querySelectorAll('[data-qty-option]'), function (qtyBtn) {
+        qtyBtn.addEventListener('click', function () {
+          selectedQty = qtyBtn.getAttribute('data-qty-option');
+          renderResults(lastItems); // re-render from already-fetched data — no new API request
+        });
+      });
     }
 
     function setLoading(loading) {
@@ -205,6 +239,7 @@
         renderMessage('Search is unavailable right now. Please call us.');
         return;
       }
+      selectedQty = 'qty1';
       setLoading(true);
       renderMessage('Searching…');
       window.tsApi.searchTires(v)

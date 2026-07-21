@@ -2,6 +2,7 @@ const { TtlCache } = require('./cache');
 const { withBrowser, resolvePortalHomeUrl } = require('./supplierClient');
 const { withRetry } = require('../utils/retry');
 const sessionManager = require('./sessionManager');
+const { calculateRetailTiers } = require('./pricing');
 const env = require('../config/env');
 
 const searchCache = new TtlCache(env.searchCacheTtlMs);
@@ -10,23 +11,45 @@ function buildSizeQuery({ width, ratio, diameter }) {
   return `${width}${ratio}${diameter}`;
 }
 
-// Deliberately never selects .priceCell / .FETCell — wholesale price and tax
-// figures must never be read out of the page, let alone returned to a client.
+function parseWholesalePrice(text) {
+  if (!text) return null;
+  const cleaned = String(text).replace(/[^0-9.]/g, '');
+  if (!cleaned) return null;
+  const value = Number(cleaned);
+  return Number.isFinite(value) ? value : null;
+}
+
+// .priceCell ("Your Price") is read here ONLY to compute retail markup tiers.
+// The raw wholesale number is never included in the object returned below —
+// every field of the response is built explicitly, nothing is ever spread
+// from the raw scraped row, so wholesale cost cannot leak through this path.
 async function extractResults(page) {
   const noDataVisible = await page.locator('#ctl00_PageContent_NoDataMsg').count();
   if (noDataVisible > 0) return [];
 
-  return page.$$eval('#ctl00_PageContent_ItemGrid tbody tr', (rows) =>
+  const rawRows = await page.$$eval('#ctl00_PageContent_ItemGrid tbody tr', (rows) =>
     rows.map((row) => {
       const text = (selector) => row.querySelector(selector)?.textContent?.trim() || '';
       return {
         description: text('.descrCell'),
         partCode: text('.mfgPcCell'),
         speedIndex: text('.speedIndexCell'),
-        availability: text('.availCell')
+        availability: text('.availCell'),
+        wholesaleText: text('.priceCell')
       };
     })
   );
+
+  return rawRows.map((row) => {
+    const wholesaleCost = parseWholesalePrice(row.wholesaleText);
+    return {
+      description: row.description,
+      partCode: row.partCode,
+      speedIndex: row.speedIndex,
+      availability: row.availability,
+      retailPrice: wholesaleCost === null ? null : calculateRetailTiers(wholesaleCost)
+    };
+  });
 }
 
 async function runSupplierSearch(query) {
