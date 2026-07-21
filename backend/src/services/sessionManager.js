@@ -2,7 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const env = require('../config/env');
 
-const DATA_DIR = path.join(__dirname, '..', '..', 'data');
+const DATA_DIR = env.sessionDataDir || path.join(__dirname, '..', '..', 'data');
 const STORAGE_STATE_PATH = path.join(DATA_DIR, 'storageState.json');
 const SESSION_META_PATH = path.join(DATA_DIR, 'session-meta.json');
 

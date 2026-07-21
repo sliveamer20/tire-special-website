@@ -9,6 +9,10 @@ module.exports = {
   supplierUsername: process.env.SUPPLIER_USERNAME || '',
   supplierPassword: process.env.SUPPLIER_PASSWORD || '',
 
+  // Absolute path override for where session/cache data is stored (e.g. a mounted
+  // Railway volume like /data). Falls back to the local backend/data/ folder when unset.
+  sessionDataDir: process.env.SESSION_DATA_DIR || '',
+
   // How long a saved Playwright session is trusted before a fresh login is required.
   sessionTtlMs: Number(process.env.SESSION_TTL_MS) || 12 * 60 * 60 * 1000, // 12h default
   // How long search results are served from cache before hitting the supplier again.
