@@ -125,14 +125,16 @@
     var empty = btn.getAttribute('data-cta-empty') || 'Get Price';
     var suffix = btn.getAttribute('data-cta-suffix') || '';
     var icon = btn.getAttribute('data-cta-icon') === 'phone' ? ic('phone', 17) + ' ' : '';
+    function clean(v) { return (v || '').replace(/[^0-9]/g, ''); }
     function update() {
-      if (w.value && r.value && d.value) {
-        btn.innerHTML = icon + w.value + '/' + r.value + 'R' + d.value + suffix;
+      var cw = clean(w.value), cr = clean(r.value), cd = clean(d.value);
+      if (cw && cr && cd) {
+        btn.innerHTML = icon + cw + '/' + cr + 'R' + cd + suffix;
       } else {
         btn.innerHTML = icon + empty;
       }
     }
-    [w, r, d].forEach(function (s) { s.addEventListener('change', update); });
+    [w, r, d].forEach(function (s) { s.addEventListener('change', update); s.addEventListener('input', update); });
     update();
   }
 
