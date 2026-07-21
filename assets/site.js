@@ -114,6 +114,12 @@
   }
 
   /* ---- Tire size finder ---- */
+  function escapeHtml(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+
   function wireFinder() {
     var box = document.querySelector('[data-finder]');
     if (!box) return;
@@ -125,17 +131,87 @@
     var empty = btn.getAttribute('data-cta-empty') || 'Get Price';
     var suffix = btn.getAttribute('data-cta-suffix') || '';
     var icon = btn.getAttribute('data-cta-icon') === 'phone' ? ic('phone', 17) + ' ' : '';
+    var isSearching = false;
+
     function clean(v) { return (v || '').replace(/[^0-9]/g, ''); }
+    function dims() { return { width: clean(w.value), ratio: clean(r.value), diameter: clean(d.value) }; }
+    function isComplete(v) { return Boolean(v.width && v.ratio && v.diameter); }
+
     function update() {
-      var cw = clean(w.value), cr = clean(r.value), cd = clean(d.value);
-      if (cw && cr && cd) {
-        btn.innerHTML = icon + cw + '/' + cr + 'R' + cd + suffix;
+      if (isSearching) return;
+      var v = dims();
+      if (isComplete(v)) {
+        btn.innerHTML = icon + v.width + '/' + v.ratio + 'R' + v.diameter + suffix;
       } else {
         btn.innerHTML = icon + empty;
       }
     }
     [w, r, d].forEach(function (s) { s.addEventListener('change', update); s.addEventListener('input', update); });
     update();
+
+    /* Results panel — created at runtime, hidden until a search runs so the
+       page markup/layout is unchanged until the user actually searches. */
+    var results = document.createElement('div');
+    results.setAttribute('data-finder-results', '');
+    results.hidden = true;
+    results.style.cssText = 'max-width:1280px;margin:18px auto 0;padding:0 24px;';
+    box.insertAdjacentElement('afterend', results);
+
+    function renderMessage(text) {
+      results.hidden = false;
+      results.innerHTML = '<div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:20px 22px;color:var(--muted);font-family:\'Barlow\',sans-serif;font-size:15px;">' + escapeHtml(text) + '</div>';
+    }
+
+    function renderResults(items) {
+      results.hidden = false;
+      if (!items || !items.length) {
+        renderMessage("No tires found for that size. Call us and we'll check availability.");
+        return;
+      }
+      var rows = items.map(function (item) {
+        var tags = [];
+        if (item.partCode) tags.push('<span>Part# ' + escapeHtml(item.partCode) + '</span>');
+        if (item.speedIndex) tags.push('<span>Speed ' + escapeHtml(item.speedIndex) + '</span>');
+        if (item.availability) tags.push('<span>Avail ' + escapeHtml(item.availability) + '</span>');
+        return '<div style="display:flex;flex-wrap:wrap;gap:6px 18px;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid var(--border);">' +
+          '<div style="font-family:\'Barlow\',sans-serif;font-size:15px;color:var(--text);font-weight:600;">' + escapeHtml(item.description) + '</div>' +
+          '<div style="display:flex;gap:16px;flex-wrap:wrap;font-size:13px;color:var(--muted);font-family:\'Barlow Condensed\',sans-serif;letter-spacing:.03em;text-transform:uppercase;">' + tags.join('') + '</div>' +
+        '</div>';
+      }).join('');
+      results.innerHTML = '<div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;overflow:hidden;">' + rows + '</div>';
+    }
+
+    function setLoading(loading) {
+      isSearching = loading;
+      if (loading) {
+        btn.setAttribute('aria-disabled', 'true');
+        btn.style.pointerEvents = 'none';
+        btn.style.opacity = '0.65';
+        btn.innerHTML = 'Searching…';
+      } else {
+        btn.removeAttribute('aria-disabled');
+        btn.style.pointerEvents = '';
+        btn.style.opacity = '';
+        update();
+      }
+    }
+
+    btn.addEventListener('click', function (e) {
+      if (isSearching) { e.preventDefault(); return; }
+      var v = dims();
+      if (!isComplete(v)) return; // incomplete size: fall through to the tel: link
+      e.preventDefault();
+      if (!window.tsApi || typeof window.tsApi.searchTires !== 'function') {
+        renderMessage('Search is unavailable right now. Please call us.');
+        return;
+      }
+      setLoading(true);
+      renderMessage('Searching…');
+      window.tsApi.searchTires(v)
+        .then(function (data) { renderResults(data && data.results); })
+        .catch(function () { renderMessage('We could not complete your search. Please try again or call us.'); })
+        .then(function () { setLoading(false); });
+    });
   }
 
   /* ---- Booking form ---- */
