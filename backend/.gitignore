@@ -6,3 +6,6 @@ storageState.json
 *.session.json
 cache/
 *.cache
+
+# Playwright session + cache data (see src/services/sessionManager.js, cache.js)
+data/
