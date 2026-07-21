@@ -1,0 +1,8 @@
+node_modules/
+.env
+.env.*
+!.env.example
+storageState.json
+*.session.json
+cache/
+*.cache
