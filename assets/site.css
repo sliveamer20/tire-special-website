@@ -161,6 +161,25 @@ html[data-theme="light"] #tsh .ts-logo-dark{display:none;}
 .ts-showing{margin-left:auto;font-family:'Barlow',sans-serif;font-size:14px;font-weight:600;color:var(--muted);}
 .ts-filter-toggle{display:none;align-items:center;gap:7px;cursor:pointer;font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:14px;letter-spacing:.04em;text-transform:uppercase;padding:10px 16px;border-radius:10px;border:1px solid var(--border);background:var(--surface);color:var(--text);}
 
+/* Light Mode only: on index.html the finder (and the results panel injected
+   right after it) sits inside the hero section's photo background, which
+   never changes with the theme. Every other result element (.ts-card,
+   .ts-sidebar, .ts-state, skeleton cards) already paints its own var(--surface)
+   backdrop, so their text stays legible regardless of what's behind them —
+   .ts-res-head and .ts-toolbar were the only pieces left floating with no
+   backdrop of their own. Giving them the same opaque surface fixes contrast
+   without touching Dark Mode, since this rule only matches when the theme
+   attribute is "light".
+*/
+html[data-theme="light"] .ts-res-head,
+html[data-theme="light"] .ts-toolbar{
+  background:var(--surface);
+  border:1px solid var(--border);
+  border-radius:14px;
+  padding:14px 18px;
+  box-shadow:0 14px 40px rgba(22,23,27,.05);
+}
+
 /* Workspace: sidebar + grid */
 .ts-workspace{display:grid;grid-template-columns:262px 1fr;gap:24px;align-items:start;}
 .ts-sidebar{position:sticky;top:16px;background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:18px 18px 8px;box-shadow:0 14px 40px rgba(22,23,27,.05);}
