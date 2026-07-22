@@ -19,6 +19,87 @@ function parseWholesalePrice(text) {
   return Number.isFinite(value) ? value : null;
 }
 
+// Selecting a grid row (single click -> onGRS) swaps the values shown in the
+// "#item" specifications widget client-side (no server round trip, ~50ms).
+// The widget's #dtlItem span mirrors the row's data-id, so we use that as the
+// correlation key to confirm the widget has caught up with the row we clicked
+// before reading its fields.
+function emptySpecifications() {
+  return {
+    brand: null,
+    category: null,
+    tread: null,
+    utqg: null,
+    mileageWarranty: null,
+    origin: null,
+    dot: null,
+    plyRating: null,
+    loadIndex: null,
+    speedRating: null,
+    manufacturingDate: null,
+    cubicFt: null,
+    purchaseType: null,
+    contLoad40HC: null,
+    exportOnly: null,
+    approxWeightLbs: null,
+    eMark: null,
+    fet: null,
+    flapIncluded: null,
+    sMark: null,
+    manufacturer: null,
+    duty: null
+  };
+}
+
+async function fetchRowSpecifications(page, itemId, rowIndex) {
+  if (!itemId) return emptySpecifications();
+
+  try {
+    const current = await page.locator('#dtlItem').textContent().catch(() => null);
+    if (current?.trim() !== itemId) {
+      await page.locator('#ctl00_PageContent_ItemGrid tbody tr').nth(rowIndex).click();
+      await page.waitForFunction(
+        (expected) => document.querySelector('#dtlItem')?.textContent?.trim() === expected,
+        itemId,
+        { timeout: 5000 }
+      );
+    }
+
+    return await page.evaluate(() => {
+      const val = (id) => {
+        const text = document.querySelector('#' + id)?.textContent?.trim();
+        return text ? text : null;
+      };
+      return {
+        brand: val('dtlBrand'),
+        category: val('dtlCategory'),
+        tread: val('dtlTread'),
+        utqg: val('dtlUTQG'),
+        mileageWarranty: val('dtlMileWty'),
+        origin: val('dtlOrigin'),
+        dot: val('dtlDOT'),
+        plyRating: val('dtlPlyRating'),
+        loadIndex: val('dtlLoadIndex'),
+        speedRating: val('dtlSpeedIndex'),
+        manufacturingDate: val('dtlDate'),
+        cubicFt: val('dtlVolume'),
+        purchaseType: val('dtlPurchaseType'),
+        contLoad40HC: val('dtlContLdIndx'),
+        exportOnly: val('dtlExportOnly'),
+        approxWeightLbs: val('dtlWeight'),
+        eMark: val('dtlEMark'),
+        fet: val('dtlFET'),
+        flapIncluded: val('dtlFlapIncl'),
+        sMark: val('dtlSMark'),
+        manufacturer: val('dtlManufacturer'),
+        duty: val('dtlDutyYN')
+      };
+    });
+  } catch {
+    return emptySpecifications();
+  }
+}
+
 // .priceCell ("Your Price") is read here ONLY to compute retail markup tiers.
 // The raw wholesale number is never included in the object returned below —
 // every field of the response is built explicitly, nothing is ever spread
@@ -35,21 +116,27 @@ async function extractResults(page) {
         partCode: text('.mfgPcCell'),
         speedIndex: text('.speedIndexCell'),
         availability: text('.availCell'),
-        wholesaleText: text('.priceCell')
+        wholesaleText: text('.priceCell'),
+        itemId: row.getAttribute('data-id')
       };
     })
   );
 
-  return rawRows.map((row) => {
+  const results = [];
+  for (let i = 0; i < rawRows.length; i += 1) {
+    const row = rawRows[i];
     const wholesaleCost = parseWholesalePrice(row.wholesaleText);
-    return {
+    const specifications = await fetchRowSpecifications(page, row.itemId, i);
+    results.push({
       description: row.description,
       partCode: row.partCode,
       speedIndex: row.speedIndex,
       availability: row.availability,
-      retailPrice: wholesaleCost === null ? null : calculateRetailTiers(wholesaleCost)
-    };
-  });
+      retailPrice: wholesaleCost === null ? null : calculateRetailTiers(wholesaleCost),
+      specifications
+    });
+  }
+  return results;
 }
 
 async function runSupplierSearch(query) {
