@@ -46,7 +46,7 @@
         '</a>' +
         '<nav class="desk-nav">' + desk + '</nav>' +
         '<div class="head-actions">' +
-          '<button class="theme-toggle" id="tsThemeToggle" aria-label="Toggle light or dark mode" title="Toggle theme">' + SUN + MOON + '</button>' +
+          '<button class="theme-toggle" id="tsThemeToggle" data-theme-toggle aria-label="Toggle light or dark mode" title="Toggle theme">' + SUN + MOON + '</button>' +
           '<a class="call-btn" href="tel:' + PHONE + '">' + ic('phone', 18) + ' <span class="call-full">Call Now</span></a>' +
           '<button class="burger" id="tsBurger" aria-label="Menu" aria-expanded="false"><span></span><span></span><span></span></button>' +
         '</div>' +
@@ -157,62 +157,377 @@
     results.style.cssText = 'max-width:1280px;margin:18px auto 0;padding:0 24px;';
     box.insertAdjacentElement('afterend', results);
 
+    // Full-screen details overlay lives at body level so it escapes the finder's flow.
+    var detailsEl = document.createElement('div');
+    detailsEl.className = 'ts-details';
+    detailsEl.hidden = true;
+    document.body.appendChild(detailsEl);
+
     var QTY_OPTIONS = [
       { key: 'qty1', label: '1 Tire' },
       { key: 'qty2', label: '2 Tires' },
       { key: 'qty3Plus', label: '3+ Tires' }
     ];
+    var QTY_COUNT = { qty1: 1, qty2: 2, qty3Plus: null };
+    var SORT_OPTIONS = [
+      { key: 'recommended', label: 'Recommended' },
+      { key: 'price-asc', label: 'Price: Low to High' },
+      { key: 'price-desc', label: 'Price: High to Low' },
+      { key: 'name-asc', label: 'Name: A to Z' }
+    ];
+
+    // Optional spec fields — rendered only when the API actually provides them,
+    // so missing specs are hidden gracefully and no data is invented.
+    var SPEC_FIELDS = [
+      { key: 'brand', label: 'Brand' },
+      { key: 'mileageWarranty', label: 'Mileage Warranty' },
+      { key: 'utqg', label: 'UTQG' },
+      { key: 'speedIndex', label: 'Speed Rating' },
+      { key: 'loadIndex', label: 'Load Index' },
+      { key: 'origin', label: 'Country of Origin' },
+      { key: 'dot', label: 'DOT / Mfg Date' },
+      { key: 'partCode', label: 'Part #' }
+    ];
+
+    // ---- View state (all derived from the single fetched result set) ----
     var selectedQty = 'qty1';
-    var lastItems = null;
+    var lastSize = '';
+    var rawItems = null;       // exactly what the API returned
+    var viewItems = [];        // filtered + sorted for display
+    var sortKey = 'recommended';
+    var filters = { availability: {}, speedIndex: {}, priceMax: null };
+    var filtersOpen = false;
+
+    var SVG = {
+      close: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>',
+      filter: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z"/></svg>',
+      empty: '<svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3M8 11h6"/></svg>',
+      alert: '<svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4M12 17h.01"/></svg>'
+    };
 
     function formatPrice(n) { return '$' + Number(n).toFixed(2); }
-
-    function renderMessage(text) {
-      lastItems = null;
-      results.hidden = false;
-      results.innerHTML = '<div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:20px 22px;color:var(--muted);font-family:\'Barlow\',sans-serif;font-size:15px;">' + escapeHtml(text) + '</div>';
+    // Some fields (availability, speedIndex, partCode, description) come back flat on
+    // the result item; the rest (brand, mileageWarranty, utqg, loadIndex, origin, dot)
+    // are nested under item.specifications — check both so nothing that the API
+    // actually returned gets dropped.
+    function specValue(item, key) {
+      var v = item[key];
+      if (v === undefined || v === null) {
+        v = item.specifications ? item.specifications[key] : undefined;
+      }
+      if (v === undefined || v === null) return '';
+      return String(v).trim();
     }
+    function unitPrice(item) {
+      return item.retailPrice && typeof item.retailPrice[selectedQty] === 'number'
+        ? item.retailPrice[selectedQty] : null;
+    }
+    function distinct(field) {
+      var seen = {}, out = [];
+      (rawItems || []).forEach(function (it) {
+        var v = specValue(it, field);
+        if (v && !seen[v]) { seen[v] = 1; out.push(v); }
+      });
+      return out;
+    }
+    function priceBounds() {
+      var vals = (rawItems || []).map(unitPrice).filter(function (v) { return typeof v === 'number'; });
+      if (!vals.length) return null;
+      return { min: Math.floor(Math.min.apply(null, vals)), max: Math.ceil(Math.max.apply(null, vals)) };
+    }
+
+    // ---- State panels (styled, no invented data) ----
+    function renderState(kind, title, text, showCall) {
+      rawItems = null;
+      results.hidden = false;
+      var icon = kind === 'error' ? SVG.alert : SVG.empty;
+      results.innerHTML =
+        '<div class="ts-state">' +
+          '<div class="ts-state-ico ts-state-' + kind + '">' + icon + '</div>' +
+          '<div class="ts-state-title">' + escapeHtml(title) + '</div>' +
+          '<div class="ts-state-text">' + escapeHtml(text) + '</div>' +
+          (showCall ? '<a class="ts-cta ts-state-cta" href="tel:+18134433869">' + ic('phone', 17) + ' Call (813) 443-3869</a>' : '') +
+        '</div>';
+    }
+    function renderMessage(text) { renderState('empty', 'Heads up', text, true); }
+
+    function renderSkeleton() {
+      rawItems = null;
+      results.hidden = false;
+      var cards = '';
+      for (var i = 0; i < 6; i++) {
+        cards += '<div class="ts-sk-card">' +
+          '<div class="ts-sk-line" style="width:62%"></div>' +
+          '<div class="ts-sk-line" style="width:34%"></div>' +
+          '<div class="ts-sk-line" style="width:80%;margin-top:14px"></div>' +
+          '<div class="ts-sk-line" style="width:50%"></div>' +
+          '<div class="ts-sk-price"></div>' +
+          '<div class="ts-sk-btn"></div>' +
+        '</div>';
+      }
+      results.innerHTML =
+        '<div class="ts-sk-head"></div>' +
+        '<div class="ts-res-grid">' + cards + '</div>';
+    }
+
+    function renderCard(item, idx) {
+      var brand = specValue(item, 'brand');
+      var name = escapeHtml(item.description || 'Tire');
+      var sizeChip = lastSize ? '<span class="ts-size-chip">' + escapeHtml(lastSize) + '</span>' : '';
+      var brandLine = brand ? '<div class="ts-card-brand">' + escapeHtml(brand) + '</div>' : '';
+      var avail = specValue(item, 'availability');
+      var badge = avail ? '<span class="ts-badge"><span class="ts-badge-dot"></span>' + escapeHtml(avail) + '</span>' : '';
+
+      var specs = SPEC_FIELDS.filter(function (f) {
+        return f.key !== 'brand' && specValue(item, f.key);
+      }).slice(0, 4).map(function (f) {
+        return '<div class="ts-spec"><dt>' + escapeHtml(f.label) + '</dt><dd>' + escapeHtml(specValue(item, f.key)) + '</dd></div>';
+      }).join('');
+      var specBlock = specs ? '<dl class="ts-specs">' + specs + '</dl>' : '';
+
+      var unit = unitPrice(item), priceBlock;
+      if (unit != null) {
+        var n = QTY_COUNT[selectedQty];
+        var sub = n ? 'Est. ' + formatPrice(unit * n) + ' for ' + n + (n === 1 ? ' tire' : ' tires') : 'Price shown per tire';
+        priceBlock =
+          '<div class="ts-price-line"><span class="ts-price">' + escapeHtml(formatPrice(unit)) + '</span><span class="ts-price-unit">/ tire</span></div>' +
+          '<div class="ts-price-sub">' + escapeHtml(sub) + '</div>';
+      } else {
+        priceBlock = '<div class="ts-price-call">Call for price</div>';
+      }
+
+      return '<div class="ts-card">' +
+        '<div class="ts-card-top"><div class="ts-card-heads">' + brandLine +
+          '<h3 class="ts-card-name">' + name + '</h3></div>' + sizeChip + '</div>' +
+        badge + specBlock +
+        '<div class="ts-price-wrap">' + priceBlock +
+          '<div class="ts-card-actions">' +
+            '<button type="button" class="ts-btn-ghost" data-view-idx="' + idx + '">View Details</button>' +
+            '<a class="ts-cta" href="tel:+18134433869">' + ic('phone', 17) + ' Call to Order</a>' +
+          '</div>' +
+        '</div>' +
+      '</div>';
+    }
+
+    // ---- Filters + sort applied to the fetched set (never a new request) ----
+    function computeView() {
+      var items = (rawItems || []).slice();
+      var af = Object.keys(filters.availability), sf = Object.keys(filters.speedIndex);
+      items = items.filter(function (it) {
+        if (af.length && !filters.availability[specValue(it, 'availability')]) return false;
+        if (sf.length && !filters.speedIndex[specValue(it, 'speedIndex')]) return false;
+        if (filters.priceMax != null) {
+          var p = unitPrice(it);
+          if (p != null && p > filters.priceMax) return false; // unknown price is never filtered out
+        }
+        return true;
+      });
+      if (sortKey === 'price-asc' || sortKey === 'price-desc') {
+        items.sort(function (a, b) {
+          var pa = unitPrice(a), pb = unitPrice(b);
+          if (pa == null && pb == null) return 0;
+          if (pa == null) return 1; if (pb == null) return -1;
+          return sortKey === 'price-asc' ? pa - pb : pb - pa;
+        });
+      } else if (sortKey === 'name-asc') {
+        items.sort(function (a, b) { return String(a.description || '').localeCompare(String(b.description || '')); });
+      }
+      return items;
+    }
+
+    function renderSidebar() {
+      var groups = '';
+      var avails = distinct('availability');
+      var speeds = distinct('speedIndex');
+      var pb = priceBounds();
+
+      if (avails.length) {
+        groups += '<div class="ts-fgroup"><div class="ts-fgroup-t">Availability</div>' +
+          avails.map(function (v) {
+            var on = !!filters.availability[v];
+            return '<label class="ts-check"><input type="checkbox" data-f="availability" value="' + escapeHtml(v) + '"' + (on ? ' checked' : '') + '><span>' + escapeHtml(v) + '</span></label>';
+          }).join('') + '</div>';
+      }
+      if (speeds.length) {
+        groups += '<div class="ts-fgroup"><div class="ts-fgroup-t">Speed Rating</div>' +
+          speeds.map(function (v) {
+            var on = !!filters.speedIndex[v];
+            return '<label class="ts-check"><input type="checkbox" data-f="speedIndex" value="' + escapeHtml(v) + '"' + (on ? ' checked' : '') + '><span>' + escapeHtml(v) + '</span></label>';
+          }).join('') + '</div>';
+      }
+      if (pb && pb.max > pb.min) {
+        var cur = filters.priceMax != null ? filters.priceMax : pb.max;
+        groups += '<div class="ts-fgroup"><div class="ts-fgroup-t">Max Price / Tire</div>' +
+          '<input type="range" class="ts-range" data-price-range min="' + pb.min + '" max="' + pb.max + '" step="1" value="' + cur + '">' +
+          '<div class="ts-range-val">Up to <strong>' + formatPrice(cur) + '</strong></div></div>';
+      }
+      if (!groups) groups = '<div class="ts-fgroup-empty">No filters available for these results.</div>';
+
+      return '<aside class="ts-sidebar' + (filtersOpen ? ' is-open' : '') + '" aria-label="Filters">' +
+        '<div class="ts-sidebar-head"><span>Filters</span>' +
+          '<button type="button" class="ts-clear" data-clear-filters>Clear all</button></div>' +
+        groups +
+      '</aside>';
+    }
+
+    function renderWorkspace() {
+      viewItems = computeView();
+      var total = (rawItems || []).length;
+      var head = '<div class="ts-res-head">' +
+        '<h2 class="ts-res-title">' + total + (total === 1 ? ' Match' : ' Matches') +
+          (lastSize ? ' for ' + escapeHtml(lastSize) : '') + '</h2>' +
+        '<span class="ts-res-sub">Live retail pricing · installation available in-store</span>' +
+      '</div>';
+
+      var qtyBar = '<div class="ts-qtybar" role="group" aria-label="Quantity">' +
+        QTY_OPTIONS.map(function (opt) {
+          var active = opt.key === selectedQty;
+          return '<button type="button" class="ts-qtybtn" data-qty-option="' + opt.key + '" aria-pressed="' + (active ? 'true' : 'false') + '">' + opt.label + '</button>';
+        }).join('') + '</div>';
+
+      var sortSel = '<div class="ts-sort"><label class="ts-sort-l" for="tsSort">Sort</label>' +
+        '<select id="tsSort" class="ts-sort-sel">' +
+          SORT_OPTIONS.map(function (o) {
+            return '<option value="' + o.key + '"' + (o.key === sortKey ? ' selected' : '') + '>' + escapeHtml(o.label) + '</option>';
+          }).join('') +
+        '</select></div>';
+
+      var toolbar = '<div class="ts-toolbar">' +
+        '<button type="button" class="ts-filter-toggle" data-filter-toggle>' + SVG.filter + ' Filters</button>' +
+        qtyBar + sortSel +
+        '<span class="ts-showing">Showing ' + viewItems.length + ' of ' + total + '</span>' +
+      '</div>';
+
+      var grid = viewItems.length
+        ? '<div class="ts-res-grid">' + viewItems.map(renderCard).join('') + '</div>'
+        : '<div class="ts-state ts-state-inline"><div class="ts-state-ico ts-state-empty">' + SVG.empty + '</div>' +
+          '<div class="ts-state-title">No matches for these filters</div>' +
+          '<div class="ts-state-text">Try clearing a filter to see more tires.</div>' +
+          '<button type="button" class="ts-btn-ghost" data-clear-filters>Clear filters</button></div>';
+
+      results.innerHTML = head + toolbar +
+        '<div class="ts-workspace">' + renderSidebar() + '<div class="ts-grid-wrap">' + grid + '</div></div>';
+
+      wireWorkspace();
+    }
+
+    function wireWorkspace() {
+      Array.prototype.forEach.call(results.querySelectorAll('[data-qty-option]'), function (b) {
+        b.addEventListener('click', function () {
+          selectedQty = b.getAttribute('data-qty-option');
+          filters.priceMax = null; // price scale depends on qty — reset so nothing is silently hidden
+          renderWorkspace(); // re-render from already-fetched data — no new API request
+        });
+      });
+      var sortSel = results.querySelector('.ts-sort-sel');
+      if (sortSel) sortSel.addEventListener('change', function () { sortKey = sortSel.value; renderWorkspace(); });
+
+      Array.prototype.forEach.call(results.querySelectorAll('input[data-f]'), function (cb) {
+        cb.addEventListener('change', function () {
+          var group = cb.getAttribute('data-f'), val = cb.value;
+          if (cb.checked) filters[group][val] = 1; else delete filters[group][val];
+          renderWorkspace();
+        });
+      });
+      var range = results.querySelector('[data-price-range]');
+      if (range) range.addEventListener('input', function () {
+        filters.priceMax = Number(range.value);
+        var lbl = results.querySelector('.ts-range-val strong');
+        if (lbl) lbl.textContent = formatPrice(filters.priceMax);
+        // debounce grid re-render to keep the slider smooth
+        clearTimeout(range._t);
+        range._t = setTimeout(renderWorkspace, 120);
+      });
+      Array.prototype.forEach.call(results.querySelectorAll('[data-clear-filters]'), function (b) {
+        b.addEventListener('click', function () {
+          filters = { availability: {}, speedIndex: {}, priceMax: null };
+          renderWorkspace();
+        });
+      });
+      var toggle = results.querySelector('[data-filter-toggle]');
+      if (toggle) toggle.addEventListener('click', function () {
+        filtersOpen = !filtersOpen;
+        var sb = results.querySelector('.ts-sidebar');
+        if (sb) sb.classList.toggle('is-open', filtersOpen);
+      });
+      Array.prototype.forEach.call(results.querySelectorAll('[data-view-idx]'), function (b) {
+        b.addEventListener('click', function () { openDetails(viewItems[Number(b.getAttribute('data-view-idx'))]); });
+      });
+    }
+
+    // ---- Tire details view (overlay populated from the already-fetched item) ----
+    function openDetails(item) {
+      if (!item) return;
+      var brand = specValue(item, 'brand');
+      var avail = specValue(item, 'availability');
+      var badge = avail ? '<span class="ts-badge"><span class="ts-badge-dot"></span>' + escapeHtml(avail) + '</span>' : '';
+
+      var tierRows = QTY_OPTIONS.map(function (opt) {
+        var p = item.retailPrice && typeof item.retailPrice[opt.key] === 'number' ? item.retailPrice[opt.key] : null;
+        var n = QTY_COUNT[opt.key];
+        var tot = (p != null && n) ? formatPrice(p * n) : '—';
+        return '<tr' + (opt.key === selectedQty ? ' class="is-sel"' : '') + '><th scope="row">' + escapeHtml(opt.label) + '</th>' +
+          '<td>' + (p != null ? formatPrice(p) + ' / tire' : 'Call for price') + '</td>' +
+          '<td>' + tot + '</td></tr>';
+      }).join('');
+
+      var specs = SPEC_FIELDS.filter(function (f) {
+        return f.key !== 'brand' && specValue(item, f.key);
+      }).map(function (f) {
+        return '<div class="ts-spec"><dt>' + escapeHtml(f.label) + '</dt><dd>' + escapeHtml(specValue(item, f.key)) + '</dd></div>';
+      }).join('');
+      var specBlock = specs
+        ? '<dl class="ts-specs ts-specs-lg">' + specs + '</dl>'
+        : '<p class="ts-dt-note">Full specifications are confirmed by phone for this tire.</p>';
+
+      detailsEl.innerHTML =
+        '<div class="ts-dt-backdrop" data-dt-close></div>' +
+        '<div class="ts-dt-panel" role="dialog" aria-modal="true" aria-label="Tire details">' +
+          '<button type="button" class="ts-dt-x" data-dt-close aria-label="Close">' + SVG.close + '</button>' +
+          '<div class="ts-dt-hero">' +
+            (brand ? '<div class="ts-card-brand">' + escapeHtml(brand) + '</div>' : '') +
+            '<h2 class="ts-dt-name">' + escapeHtml(item.description || 'Tire') + '</h2>' +
+            '<div class="ts-dt-meta">' + (lastSize ? '<span class="ts-size-chip">' + escapeHtml(lastSize) + '</span>' : '') + badge + '</div>' +
+          '</div>' +
+          '<div class="ts-dt-body">' +
+            '<div class="ts-dt-pricing"><h3 class="ts-dt-h">Pricing</h3>' +
+              '<table class="ts-tiers"><thead><tr><th>Quantity</th><th>Per Tire</th><th>Total</th></tr></thead><tbody>' + tierRows + '</tbody></table>' +
+              '<p class="ts-dt-note">Prices are live retail. Mount &amp; balance available in-store.</p>' +
+            '</div>' +
+            '<div class="ts-dt-specs"><h3 class="ts-dt-h">Specifications</h3>' + specBlock + '</div>' +
+          '</div>' +
+          '<div class="ts-dt-actions">' +
+            '<a class="ts-cta" href="tel:+18134433869">' + ic('phone', 17) + ' Call to Order</a>' +
+            '<a class="ts-btn-ghost ts-btn-ghost-lg" href="book.html">Book Installation</a>' +
+          '</div>' +
+        '</div>';
+      detailsEl.hidden = false;
+      document.body.style.overflow = 'hidden';
+      var x = detailsEl.querySelector('.ts-dt-x'); if (x) x.focus();
+      Array.prototype.forEach.call(detailsEl.querySelectorAll('[data-dt-close]'), function (c) {
+        c.addEventListener('click', closeDetails);
+      });
+    }
+    function closeDetails() {
+      detailsEl.hidden = true;
+      detailsEl.innerHTML = '';
+      document.body.style.overflow = '';
+    }
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape' && detailsEl && !detailsEl.hidden) closeDetails();
+    });
 
     function renderResults(items) {
       results.hidden = false;
-      lastItems = items;
       if (!items || !items.length) {
-        renderMessage("No tires found for that size. Call us and we'll check availability.");
+        renderState('empty', 'No tires found', "We couldn't find that size in stock right now — call us and we'll source it for you.", true);
         return;
       }
-
-      var qtyBar = '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;">' +
-        QTY_OPTIONS.map(function (opt) {
-          var active = opt.key === selectedQty;
-          return '<button type="button" data-qty-option="' + opt.key + '" style="cursor:pointer;font-family:\'Barlow Condensed\',sans-serif;font-weight:700;font-size:14px;letter-spacing:.04em;text-transform:uppercase;padding:9px 16px;border-radius:9px;border:1px solid ' + (active ? 'transparent' : 'var(--border)') + ';background:' + (active ? '#FFD21E' : 'var(--surface)') + ';color:' + (active ? '#16171b' : 'var(--text)') + ';">' + opt.label + '</button>';
-        }).join('') +
-      '</div>';
-
-      var rows = items.map(function (item) {
-        var tags = [];
-        if (item.partCode) tags.push('<span>Part# ' + escapeHtml(item.partCode) + '</span>');
-        if (item.speedIndex) tags.push('<span>Speed ' + escapeHtml(item.speedIndex) + '</span>');
-        if (item.availability) tags.push('<span>Avail ' + escapeHtml(item.availability) + '</span>');
-        var priceText = item.retailPrice && typeof item.retailPrice[selectedQty] === 'number'
-          ? formatPrice(item.retailPrice[selectedQty]) + ' / tire'
-          : 'Call for price';
-        return '<div style="display:flex;flex-wrap:wrap;gap:6px 18px;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid var(--border);">' +
-          '<div style="font-family:\'Barlow\',sans-serif;font-size:15px;color:var(--text);font-weight:600;">' + escapeHtml(item.description) + '</div>' +
-          '<div style="display:flex;gap:16px;flex-wrap:wrap;align-items:center;">' +
-            '<div style="display:flex;gap:16px;flex-wrap:wrap;font-size:13px;color:var(--muted);font-family:\'Barlow Condensed\',sans-serif;letter-spacing:.03em;text-transform:uppercase;">' + tags.join('') + '</div>' +
-            '<div style="font-family:\'Barlow Condensed\',sans-serif;font-weight:800;font-size:17px;color:var(--text);white-space:nowrap;">' + priceText + '</div>' +
-          '</div>' +
-        '</div>';
-      }).join('');
-
-      results.innerHTML = qtyBar + '<div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;overflow:hidden;">' + rows + '</div>';
-
-      Array.prototype.forEach.call(results.querySelectorAll('[data-qty-option]'), function (qtyBtn) {
-        qtyBtn.addEventListener('click', function () {
-          selectedQty = qtyBtn.getAttribute('data-qty-option');
-          renderResults(lastItems); // re-render from already-fetched data — no new API request
-        });
-      });
+      rawItems = items;
+      sortKey = 'recommended';
+      filters = { availability: {}, speedIndex: {}, priceMax: null };
+      filtersOpen = false;
+      renderWorkspace();
     }
 
     function setLoading(loading) {
@@ -240,11 +555,12 @@
         return;
       }
       selectedQty = 'qty1';
+      lastSize = v.width + '/' + v.ratio + 'R' + v.diameter;
       setLoading(true);
-      renderMessage('Searching…');
+      renderSkeleton();
       window.tsApi.searchTires(v)
         .then(function (data) { renderResults(data && data.results); })
-        .catch(function () { renderMessage('We could not complete your search. Please try again or call us.'); })
+        .catch(function () { renderState('error', 'Search unavailable', 'We could not reach live pricing just now. Please try again in a moment or call us — we can check your size in seconds.', true); })
         .then(function () { setLoading(false); });
     });
   }
