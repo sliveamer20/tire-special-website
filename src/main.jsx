@@ -7,6 +7,9 @@ import { SiteFooter, SiteHeader, ThemeProvider } from './components/SiteChrome.j
 import { replaceFinderNode } from './components/TireSearch.jsx';
 import { BookingProvider, replaceBookingNode } from './components/Booking.jsx';
 import { MechanicAssistant } from './components/MechanicAssistant.jsx';
+import { SmoothScrollProvider } from './components/SmoothScrollProvider.jsx';
+import VariableProximity from './components/reactbits/VariableProximity.jsx';
+import 'lenis/dist/lenis.css';
 import './theme.css';
 
 gsap.registerPlugin(ScrollTrigger);
@@ -19,6 +22,12 @@ const pageContent = import.meta.glob('./pages/*.html', { query: '?raw', import: 
 
 function PageContent({ content }) {
   return parse(content, { replace(node) {
+    if (node.attribs?.['data-variable-proximity'] !== undefined) {
+      const props = attributesToProps(node.attribs);
+      delete props['data-variable-proximity'];
+      const label = node.children?.map((child) => child.data ?? '').join('') ?? '';
+      return <h1 {...props}><VariableProximity label={label} fromFontVariationSettings="'wght' 650, 'opsz' 48" toFontVariationSettings="'wght' 1000, 'opsz' 64" radius={72} /></h1>;
+    }
     if (node.attribs?.['data-finder'] !== undefined) return replaceFinderNode(node);
     if (node.attribs?.id?.startsWith('book')) {
       const replacement = replaceBookingNode(node);
@@ -70,12 +79,12 @@ function PageMotion({ children }) {
 }
 
 function SitePage({ page }) {
-  return <ThemeProvider><BookingProvider>
+  return <SmoothScrollProvider><ThemeProvider><BookingProvider>
     <div id="site-header"><SiteHeader activePage={page.key} /></div>
     <PageMotion><main id={page.id} data-page-root><PageContent content={page.content} /></main></PageMotion>
     <div id="site-footer"><SiteFooter /></div>
     <div id="mechanic-root"><MechanicAssistant /></div>
-  </BookingProvider></ThemeProvider>;
+  </BookingProvider></ThemeProvider></SmoothScrollProvider>;
 }
 
 const filename = pageIds[location.pathname.split('/').pop()] ? location.pathname.split('/').pop() : 'index.html';
