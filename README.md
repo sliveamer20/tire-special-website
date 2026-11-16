@@ -1,6 +1,6 @@
 # Tire Special & Auto Repair — Website
 
-A static multi-page website for Tire Special & Auto Repair (Tampa, FL). Plain HTML, CSS and JavaScript — no build step, no framework. Ready to deploy to GitHub Pages.
+A React-powered, multi-page website for Tire Special & Auto Repair (Tampa, FL). Vite builds each existing `.html` route independently, keeping the page copy in the static output while React takes ownership of the shared shell and interactions. Direct links and static hosting do not require an SPA fallback.
 
 ## Pages
 - `index.html` — Home
@@ -11,27 +11,41 @@ A static multi-page website for Tire Special & Auto Repair (Tampa, FL). Plain HT
 - `contact.html` — Contact & map
 - `privacy.html` — Privacy Policy
 
-## Shared files
-- `assets/site.css` — all styling (light/dark theme via CSS variables)
-- `assets/site.js` — injects the shared header/footer, mobile menu, tire-size finder, booking form, and scroll animations
-- `theme.js` — light/dark mode: auto by time of day, manual toggle, remembered per visitor
-- `assets/` — logos (`logo-light.png`, `logo-dark.png`) and photos
+## Frontend
+- `src/main.jsx` — React entry, shared page shell, and animation lifecycle.
+- `src/pages/` — the original page content fragments, included in each HTML output and parsed into React elements at runtime.
+- `src/components/` — React-owned site chrome, tire finder, booking flow, and Ask a Mechanic dialog.
+- `src/data/` — local mechanic symptom/scenario data and diagnosis engine.
+- `src/services/tireSearch.js` — isolated adapter for the existing public tire-search endpoint.
+- `assets/site.css` — existing presentation styles, retained for visual compatibility.
+- `assets/` and root-level images — existing logos, photos, icons and search styles.
+
+The frontend keeps the existing tire-search GET contract and public API-origin override. It does not change the backend or supplier behavior. The current booking interface is still client-side only; submitting it does not send an appointment request. Ask a Mechanic uses the retained local knowledge base and rule-based diagnosis module.
+
+## Local development
+Install the frontend dependencies and start Vite:
+
+```sh
+npm install
+npm run dev
+```
+
+Create and preview the static production build:
+
+```sh
+npm run build
+npm run preview
+```
+
+Vite writes all seven routes and their assets to `dist/`. Publish that generated directory with the existing static host's supported build-output configuration. No server-side route fallback is needed.
 
 ## Third-party
-Google Fonts and GSAP are loaded from CDNs.
+Google Fonts are loaded from Google Fonts. GSAP is installed locally and used for page reveals with a reduced-motion check and React cleanup.
 
-## Deploy to GitHub Pages
-1. Push this folder to a GitHub repository.
-2. In **Settings → Pages**, set **Source** to the `main` branch, root (`/`).
-3. The site publishes at `https://<user>.github.io/<repo>/`.
+## GitHub Pages
+The existing `.nojekyll` marker is retained. GitHub Pages must serve the Vite build output (`dist/`) rather than the unbuilt source directory; the repository does not include a Pages workflow or verified hosted Pages settings. The Vite build uses relative asset URLs for repository subpaths.
 
 `.nojekyll` is included so GitHub serves all files as-is.
 
 ## Local preview
-Open `index.html` directly, or run a static server:
-
-```
-python3 -m http.server
-```
-
-then visit http://localhost:8000
+Use `npm run dev` for development or `npm run build && npm run preview` for production-output preview.
