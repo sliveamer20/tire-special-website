@@ -7,9 +7,8 @@ const pages = ['index', 'tires', 'services', 'promotions', 'book', 'contact', 'p
 const rootDir = dirname(fileURLToPath(import.meta.url));
 
 export default defineConfig({
-  // Relative URLs keep assets and built bundles working on GitHub Pages
-  // repository subpaths as well as at a domain root.
-  base: './',
+  // Publish the multi-page build beneath the GitHub Pages repository URL.
+  base: '/tire-special-website/',
   build: {
     rollupOptions: {
       input: Object.fromEntries(pages.map((page) => [page, resolve(rootDir, `${page}.html`)])),
